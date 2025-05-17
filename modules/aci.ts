@@ -2,11 +2,12 @@ import * as resources from "@pulumi/azure-native/resources";
 import * as pulumi from "@pulumi/pulumi";
 import { ResourceProps } from "./interfaces/resourceProps";
 import { containerinstance } from "@pulumi/azure-native";
+import { Output } from "@pulumi/pulumi";
 
 interface ContainerProps {
   readonly name: string;
   readonly image: string;
-  readonly command: string[];
+  readonly command?: string[];
   readonly cpu: number;
   readonly memory: number;
   readonly environmentVariables?: {
@@ -19,9 +20,11 @@ export interface AciProps extends ResourceProps {
   readonly containerGroupName: string;
   readonly dnsNameLabel: string;
   readonly serverContainerProps: ContainerProps;
-  readonly watchdogsProps: ContainerProps;
   readonly protocol: "TCP" | "UDP";
   readonly hostPort: number;
+  readonly storageShareName: Output<string>;
+  readonly storageAccountName: Output<string>;
+  readonly storageAccountKey: Output<string>;
 }
 
 export class Aci extends pulumi.ComponentResource {
@@ -34,6 +37,9 @@ export class Aci extends pulumi.ComponentResource {
     opts?: pulumi.ComponentResourceOptions
   ) {
     super("custom:aci:ContainerInstance", name, { pretect: false }, opts);
+
+    const DATA = "data";
+
     this.resourceGroup = props.resourceGroup;
 
     this.containerGroup = new containerinstance.ContainerGroup(
@@ -71,28 +77,24 @@ export class Aci extends pulumi.ComponentResource {
                 memoryInGB: props.serverContainerProps.memory,
               },
             },
+            volumeMounts: [
+              {
+                name: DATA,
+                mountPath: `/${DATA}`,
+                readOnly: false,
+              },
+            ],
             environmentVariables:
               props.serverContainerProps.environmentVariables,
           },
+        ],
+        volumes: [
           {
-            name: "sidecar",
-            image: "curlimages/curl:8.4.0",
-            command: [
-              "sh",
-              "-c",
-              `
-while true; do
-  echo "[$(date)] Checking server...";
-  curl -v http://web:18080;
-  sleep 60;
-done
-`,
-            ],
-            resources: {
-              requests: {
-                cpu: 0.2,
-                memoryInGB: 0.2,
-              },
+            name: DATA,
+            azureFile: {
+              shareName: props.storageShareName,
+              storageAccountName: props.storageAccountName,
+              storageAccountKey: props.storageAccountKey,
             },
           },
         ],

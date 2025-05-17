@@ -1,19 +1,19 @@
 import * as storage from "@pulumi/azure-native/storage";
 import * as resources from "@pulumi/azure-native/resources";
 import * as pulumi from "@pulumi/pulumi";
-import {ResourceProps} from "./interfaces/resourceProps"
+import { ResourceProps } from "./interfaces/resourceProps";
 
-export interface StorageProps extends ResourceProps{
+export interface StorageProps extends ResourceProps {
   accountName: string;
   sku?: storage.SkuName;
   kind?: storage.Kind;
 }
 
 export class Storage extends pulumi.ComponentResource {
-  public readonly storageAccount: storage.StorageAccount;
-  public readonly primaryStorageKey: pulumi.Output<string>;
   private readonly resourceGroup: resources.ResourceGroup;
-  private readonly accountName: string;
+  public readonly storageAccount: storage.StorageAccount;
+  public readonly storageAccountKey: pulumi.Output<string>;
+  public readonly fileShare: storage.FileShare;
 
   constructor(
     name: string,
@@ -23,12 +23,11 @@ export class Storage extends pulumi.ComponentResource {
     super("custom:storage:StorageAccount", name, { pretect: false }, opts);
 
     this.resourceGroup = props.resourceGroup;
-    this.accountName = props.accountName;
 
-    this.storageAccount = new storage.StorageAccount(
+    const storageAccount = new storage.StorageAccount(
       props.accountName,
       {
-        accountName: this.accountName,
+        accountName: props.accountName,
         resourceGroupName: props.resourceGroup.name,
         sku: {
           name: props.sku || storage.SkuName.Standard_LRS,
@@ -38,32 +37,29 @@ export class Storage extends pulumi.ComponentResource {
       { parent: this }
     );
 
-    // Get Storage Account Keys
-    const storageAccountKeys = storage.listStorageAccountKeysOutput({
+    const storageAccountPrimaryKey = storage.listStorageAccountKeysOutput({
       resourceGroupName: props.resourceGroup.name,
-      accountName: this.storageAccount.name,
-    });
+      accountName: storageAccount.name,
+    }).keys[0].value;
 
-    this.primaryStorageKey = storageAccountKeys.keys[0].value;
-
-    this.registerOutputs({
-      storageAccount: this.storageAccount,
-      primaryStorageKey: this.primaryStorageKey,
-    });
-  }
-
-  public createFileShare(
-    name: string,
-    quotaInGB: number = 1
-  ): storage.FileShare {
-    return new storage.FileShare(
-      name,
+    const fileShare = new storage.FileShare(
+      `share-${props.accountName}`,
       {
         resourceGroupName: this.resourceGroup.name,
-        accountName: this.storageAccount.name,
-        shareQuota: quotaInGB,
+        accountName: storageAccount.name,
+        shareQuota: 10,
       },
       { parent: this }
     );
+
+    this.storageAccount = storageAccount;
+    this.storageAccountKey = storageAccountPrimaryKey;
+    this.fileShare = fileShare;
+
+    this.registerOutputs({
+      storageAccount,
+      storageAccountKey: storageAccountPrimaryKey,
+      fileShare,
+    });
   }
 }
